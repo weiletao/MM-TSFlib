@@ -1,8 +1,8 @@
 __pycache__/
 
-data/Environment/NewYork_AQI_Day.csv
-data/Public_Health/OT_vs_prior_history_avg.png
-data/Public_Health/visualize.py
+data/TimeMMD/Environment/NewYork_AQI_Day.csv
+data/TimeMMD/Public_Health/OT_vs_prior_history_avg.png
+data/TimeMMD/Public_Health/visualize.py
 HEALTH_MULTIMODAL_PIPELINE_ANALYSIS.md
 CLAUDE.md
 
