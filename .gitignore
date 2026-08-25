@@ -7,3 +7,10 @@ HEALTH_MULTIMODAL_PIPELINE_ANALYSIS.md
 CLAUDE.md
 
 data/TimesX/*
+
+# experiment outputs
+checkpoints/
+experiment_logs/
+results/
+test_results/
+result_longterm_forecast
