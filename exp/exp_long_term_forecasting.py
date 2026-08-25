@@ -54,6 +54,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         configs=args
         self.text_path=configs.text_path
         self.prompt_weight=configs.prompt_weight
+        self.text_mode=configs.text_mode
         self.attribute="final_sum"
         self.type_tag=configs.type_tag
         self.text_len=configs.text_len
@@ -418,6 +419,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     prompt_emb=prompt_embeddings 
                 prompt_emb = self.mlp(prompt_emb)  # (batch, prompt_token, text_embedding_dim)
+                # add text ablation
+                if self.text_mode == 'zero':
+                    prompt_emb = torch.zeros_like(prompt_emb)
+
+                elif self.text_mode == 'random':
+                    prompt_emb = torch.randn_like(prompt_emb)
+
+                elif self.text_mode == 'shuffle':
+                    index = torch.randperm(prompt_emb.size(0), device=prompt_emb.device)
+                    prompt_emb = prompt_emb[index]
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -533,7 +544,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb =self.llm_model(inputs_embeds=prompt_embeddings).last_hidden_state
                 else:
                     prompt_emb=prompt_embeddings 
-                prompt_emb = self.mlp(prompt_emb) 
+                prompt_emb = self.mlp(prompt_emb)
+                # add text ablation
+                if self.text_mode == 'zero':
+                    prompt_emb = torch.zeros_like(prompt_emb)
+
+                elif self.text_mode == 'random':
+                    prompt_emb = torch.randn_like(prompt_emb)
+
+                elif self.text_mode == 'shuffle':
+                    index = torch.randperm(prompt_emb.size(0), device=prompt_emb.device)
+                    prompt_emb = prompt_emb[index] 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
@@ -663,6 +684,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     prompt_emb=prompt_embeddings 
                 prompt_emb = self.mlp(prompt_emb)  
+                # add text ablation
+                if self.text_mode == 'zero':
+                    prompt_emb = torch.zeros_like(prompt_emb)
+
+                elif self.text_mode == 'random':
+                    prompt_emb = torch.randn_like(prompt_emb)
+
+                elif self.text_mode == 'shuffle':
+                    index = torch.randperm(prompt_emb.size(0), device=prompt_emb.device)
+                    prompt_emb = prompt_emb[index] 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
