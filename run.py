@@ -120,6 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate3', type=float, default=1e-3, help='proj learning rate')
     parser.add_argument('--prompt_weight', type=float, default=0.01, help='prompt weight')#please tune this hyperparameter for combining
     parser.add_argument('--text_mode', type=str, default='real', choices=['real', 'zero', 'random', 'shuffle'], help='text modality ablation mode')
+    parser.add_argument('--text_weight', type=float, default=1.0, help='weight for textual residual correction')
     parser.add_argument('--pool_type', type=str, default='avg', help='pooling type') #avg min max attention
     parser.add_argument('--date_name', type=str, default='end_date', help='matching date name in csv') #mlp linear
     parser.add_argument('--addHisRate', type=float, default=0.5, help='add historical rate')

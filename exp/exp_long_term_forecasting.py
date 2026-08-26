@@ -55,6 +55,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         self.text_path=configs.text_path
         self.prompt_weight=configs.prompt_weight
         self.text_mode=configs.text_mode
+        self.text_weight=configs.text_weight
         self.attribute="final_sum"
         self.type_tag=configs.type_tag
         self.text_len=configs.text_len
@@ -468,7 +469,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 
                 else:
                     prompt_emb=prompt_emb.unsqueeze(-1)
-                prompt_y=norm(prompt_emb)+prior_y
+
+                text_residual = norm(prompt_emb)
+                prompt_y = self.text_weight * text_residual + prior_y
+                # prompt_y=norm(prompt_emb)+prior_y
                 outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
 
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -596,7 +600,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         prompt_emb = weighted_prompt_emb.unsqueeze(-1)  
                 else:
                     prompt_emb=prompt_emb.unsqueeze(-1)
-                prompt_y=norm(prompt_emb)+prior_y
+
+                text_residual = norm(prompt_emb)
+                prompt_y = self.text_weight * text_residual + prior_y
+                # prompt_y=norm(prompt_emb)+prior_y
                 outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
                 
                 
@@ -735,7 +742,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 #0523
                 else:
                     prompt_emb=prompt_emb.unsqueeze(-1)
-                prompt_y=norm(prompt_emb)+prior_y
+                    
+                text_residual = norm(prompt_emb)
+                prompt_y = self.text_weight * text_residual + prior_y
+                # prompt_y=norm(prompt_emb)+prior_y
                 #outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, :]
