@@ -1,5 +1,6 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
+from layers.TextGate import TextGate
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.metrics import metric
 import torch
@@ -20,6 +21,7 @@ from utils.augmentation import run_augmentation,run_augmentation_single
 import pandas as pd
 from datetime import datetime
 import re
+import matplotlib.pyplot as plt
 
 def norm(input_emb):
     input_emb=input_emb- input_emb.mean(1, keepdim=True).detach()
@@ -42,6 +44,14 @@ class MLP(nn.Module):
                 x = F.relu(x)
                 x = self.dropout(x)  
         return x
+
+class MultiModuleState:
+    # wraps several modules so EarlyStopping saves them all in one checkpoint file
+    def __init__(self, modules):
+        self.modules = modules
+
+    def state_dict(self):
+        return {name: m.state_dict() for name, m in self.modules.items()}
 warnings.filterwarnings('ignore')
 
 
@@ -362,6 +372,8 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         #self.tokenizer=self.tokenizer.to(self.device)
         self.mlp=self.mlp.to(self.device)
         self.mlp_proj=self.mlp_proj.to(self.device)
+        self.text_gate = TextGate(configs.d_model, configs.text_emb).to(self.device)
+        self.text_gate_values = []
         self.learning_rate2=1e-2
         self.learning_rate3=1e-3
     def _build_model(self):
@@ -388,6 +400,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         model_optim = optim.Adam([{'params': self.weight1.parameters()},
                               {'params': self.weight2.parameters()}], lr=self.args.learning_rate_weight)
         return model_optim
+    def _select_optimizer_gate(self):
+        model_optim = optim.Adam(self.text_gate.parameters(), lr=self.args.learning_rate)
+        return model_optim
+    def _load_full_checkpoint(self, ckpt_path):
+        states = torch.load(ckpt_path)
+        self.model.load_state_dict(states['model'])
+        self.mlp.load_state_dict(states['mlp'])
+        self.mlp_proj.load_state_dict(states['mlp_proj'])
+        self.text_gate.load_state_dict(states['text_gate'])
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
@@ -436,15 +457,28 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        if self.args.output_attention:
+                        if self.args.model == 'PatchTST':
+                            _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                            outputs, ts_feature = _out[0], _out[1]
+                        elif self.args.output_attention:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    if self.args.output_attention:
+                    if self.args.model == 'PatchTST':
+                        _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs, ts_feature = _out[0], _out[1]
+                    elif self.args.output_attention:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                if self.args.model == 'PatchTST' and i == 0:
+                    print(
+                        "prediction:",
+                        outputs.shape,
+                        "ts:",
+                        ts_feature.shape
+                    )
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 if self.Doc2Vec==False:
@@ -471,7 +505,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
 
                 text_residual = norm(prompt_emb)
-                prompt_y = self.text_weight * text_residual + prior_y
+                if self.args.model == 'PatchTST':
+                    gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
+                    prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
+                else:
+                    prompt_y = self.text_weight * text_residual + prior_y
                 # prompt_y=norm(prompt_emb)+prior_y
                 outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
 
@@ -506,7 +544,14 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         model_optim = self._select_optimizer()
         model_optim_mlp = self._select_optimizer_mlp()
         model_optim_proj = self._select_optimizer_proj()
+        model_optim_gate = self._select_optimizer_gate()
         criterion = self._select_criterion()
+        ckpt_bundle = MultiModuleState({
+            'model': self.model,
+            'mlp': self.mlp,
+            'mlp_proj': self.mlp_proj,
+            'text_gate': self.text_gate,
+        })
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -524,6 +569,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 model_optim.zero_grad()
                 model_optim_mlp.zero_grad()
                 model_optim_proj.zero_grad()
+                model_optim_gate.zero_grad()
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 #0523
@@ -565,15 +611,28 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        if self.args.output_attention:
+                        if self.args.model == 'PatchTST':
+                            _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                            outputs, ts_feature = _out[0], _out[1]
+                        elif self.args.output_attention:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    if self.args.output_attention:
+                    if self.args.model == 'PatchTST':
+                        _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs, ts_feature = _out[0], _out[1]
+                    elif self.args.output_attention:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                if self.args.model == 'PatchTST' and i == 0:
+                    print(
+                        "prediction:",
+                        outputs.shape,
+                        "ts:",
+                        ts_feature.shape
+                    )
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 if self.Doc2Vec==False:
@@ -602,7 +661,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
 
                 text_residual = norm(prompt_emb)
-                prompt_y = self.text_weight * text_residual + prior_y
+                if self.args.model == 'PatchTST':
+                    gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
+                    prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
+                else:
+                    prompt_y = self.text_weight * text_residual + prior_y
                 # prompt_y=norm(prompt_emb)+prior_y
                 outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
                 
@@ -623,12 +686,16 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 if self.args.use_amp:
                     scaler.scale(loss).backward()
                     scaler.step(model_optim)
+                    scaler.step(model_optim_mlp)
+                    scaler.step(model_optim_proj)
+                    scaler.step(model_optim_gate)
                     scaler.update()
                 else:
                     loss.backward()
                     model_optim.step()
                     model_optim_mlp.step()
                     model_optim_proj.step()
+                    model_optim_gate.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
@@ -637,7 +704,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                 epoch + 1, train_steps, train_loss, vali_loss, test_loss))
-            early_stopping(vali_loss, self.model, path)
+            early_stopping(vali_loss, ckpt_bundle, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
@@ -645,7 +712,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             #adjust_learning_rate(model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
-        self.model.load_state_dict(torch.load(best_model_path))
+        self._load_full_checkpoint(best_model_path)
 
         return self.model
 
@@ -653,10 +720,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self._load_full_checkpoint(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'))
 
         preds = []
         trues = []
+        self.text_gate_values = []
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -707,15 +775,28 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        if self.args.output_attention:
+                        if self.args.model == 'PatchTST':
+                            _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                            outputs, ts_feature = _out[0], _out[1]
+                        elif self.args.output_attention:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                         else:
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    if self.args.output_attention:
+                    if self.args.model == 'PatchTST':
+                        _out = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        outputs, ts_feature = _out[0], _out[1]
+                    elif self.args.output_attention:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                if self.args.model == 'PatchTST' and i == 0:
+                    print(
+                        "prediction:",
+                        outputs.shape,
+                        "ts:",
+                        ts_feature.shape
+                    )
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 if self.Doc2Vec==False:
@@ -744,7 +825,12 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
                     
                 text_residual = norm(prompt_emb)
-                prompt_y = self.text_weight * text_residual + prior_y
+                if self.args.model == 'PatchTST':
+                    gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
+                    prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
+                    self.text_gate_values.append(gate.detach().cpu())
+                else:
+                    prompt_y = self.text_weight * text_residual + prior_y
                 # prompt_y=norm(prompt_emb)+prior_y
                 #outputs=(1-self.prompt_weight)*outputs+self.prompt_weight*prompt_y
                 f_dim = -1 if self.args.features == 'MS' else 0
@@ -804,5 +890,23 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         np.save(folder_path + 'pred.npy', preds)
         np.save(folder_path + 'true.npy', trues)
+
+        if self.text_gate_values:
+            gate_values = torch.cat(self.text_gate_values)
+            print(
+                "gate mean:", gate_values.mean().item(),
+                "std:", gate_values.std().item(),
+                "min:", gate_values.min().item(),
+                "max:", gate_values.max().item()
+            )
+            gates_np = gate_values.numpy()
+            np.save(folder_path + 'gate.npy', gates_np)
+            plt.figure()
+            plt.hist(gates_np, bins=30, range=(0.0, 1.0))
+            plt.xlabel('gate value')
+            plt.ylabel('count')
+            plt.title('TextGate distribution (test)')
+            plt.savefig(os.path.join(folder_path, 'text_gate_hist.pdf'), bbox_inches='tight', dpi=300)
+            plt.close()
 
         return mse

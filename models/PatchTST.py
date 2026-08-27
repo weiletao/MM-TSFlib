@@ -88,11 +88,20 @@ class Model(nn.Module):
         # Encoder
         # z: [bs * nvars x patch_num x d_model]
         enc_out, attns = self.encoder(enc_out)
+        # save temporal representation
+        ts_feature = enc_out
         # z: [bs x nvars x patch_num x d_model]
         enc_out = torch.reshape(
             enc_out, (-1, n_vars, enc_out.shape[-2], enc_out.shape[-1]))
         # z: [bs x nvars x d_model x patch_num]
         enc_out = enc_out.permute(0, 1, 3, 2)
+
+        ts_feature = torch.reshape(
+        ts_feature,
+        (-1,n_vars,ts_feature.shape[-2],ts_feature.shape[-1]))
+
+        ts_feature = ts_feature.mean(dim=2)
+        ts_feature = ts_feature.mean(dim=1)
 
         # Decoder
         dec_out = self.head(enc_out)  # z: [bs x nvars x target_window]
@@ -103,7 +112,7 @@ class Model(nn.Module):
                   (stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
         dec_out = dec_out + \
                   (means[:, 0, :].unsqueeze(1).repeat(1, self.pred_len, 1))
-        return dec_out
+        return dec_out, ts_feature
 
     def imputation(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask):
         # Normalization from Non-stationary Transformer
@@ -205,8 +214,8 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask=None):
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
-            dec_out = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
-            return dec_out[:, -self.pred_len:, :]  # [B, L, D]
+            dec_out, ts_feature = self.forecast(x_enc, x_mark_enc, x_dec, x_mark_dec)
+            return dec_out[:, -self.pred_len:, :], ts_feature  # [B, L, D] , [B,d_model]
         if self.task_name == 'imputation':
             dec_out = self.imputation(
                 x_enc, x_mark_enc, x_dec, x_mark_dec, mask)
