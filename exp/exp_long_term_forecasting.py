@@ -66,6 +66,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         self.prompt_weight=configs.prompt_weight
         self.text_mode=configs.text_mode
         self.text_weight=configs.text_weight
+        self.use_text_gate=configs.use_text_gate
         self.attribute="final_sum"
         self.type_tag=configs.type_tag
         self.text_len=configs.text_len
@@ -505,7 +506,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
 
                 text_residual = norm(prompt_emb)
-                if self.args.model == 'PatchTST':
+                if self.args.model == 'PatchTST' and self.use_text_gate:
                     gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
                     prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
                 else:
@@ -661,7 +662,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
 
                 text_residual = norm(prompt_emb)
-                if self.args.model == 'PatchTST':
+                if self.args.model == 'PatchTST' and self.use_text_gate:
                     gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
                     prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
                 else:
@@ -825,7 +826,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     prompt_emb=prompt_emb.unsqueeze(-1)
                     
                 text_residual = norm(prompt_emb)
-                if self.args.model == 'PatchTST':
+                if self.args.model == 'PatchTST' and self.use_text_gate:
                     gate = self.text_gate(ts_feature, text_residual.squeeze(-1))
                     prompt_y = gate.unsqueeze(-1) * text_residual + prior_y
                     self.text_gate_values.append(gate.detach().cpu())
